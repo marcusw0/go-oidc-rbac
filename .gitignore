@@ -1,0 +1,15 @@
+# Local env
+.env
+.env.*
+!.env.example
+
+# Build and test artifacts
+/bin/
+/dist/
+/go-oidc-rbac
+*.test
+coverage.out
+coverage.html
+
+# Logs
+*.logs
