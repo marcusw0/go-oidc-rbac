@@ -3,12 +3,14 @@ package main
 import (
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"golang.org/x/oauth2"
 )
 
 type application struct {
 	config
+	pendingMu sync.Mutex
 	pending map[string]pendingLogin
 	oauth   oauth2.Config
 }
@@ -21,7 +23,7 @@ func (app *application) mount() http.Handler {
 
 	mux.HandleFunc("/{$}", homeHandler)
 	mux.HandleFunc("/login", app.loginHandler)
-	mux.HandleFunc("/auth/callback", callbackHandler)
+	mux.HandleFunc("/auth/callback", app.callbackHandler)
 	mux.Handle("/", app.requireAuth(protectedMux))
 
 	return mux
