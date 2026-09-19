@@ -76,25 +76,43 @@ func (app *application) callbackHandler(w http.ResponseWriter, r *http.Request) 
 
 	app.pendingMu.Lock()
 	pending, found := app.pending[transactionID.Value]
+	delete(app.pending, transactionID.Value)
+	app.pendingMu.Unlock()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oidc_transaction",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
 
 	valid := found && time.Now().Before(pending.expiresAt) &&
 		returnedState != "" &&
 		returnedState == pending.state
 
-	if valid {
-		delete(app.pending, transactionID.Value)
-	}
-	app.pendingMu.Unlock()
-
 	if !valid {
 		http.Error(w, "Invalid or expired login", http.StatusBadRequest)
-		delete(app.pending, transactionID.Value)
+		return
+	}
+
+	query := r.URL.Query()
+	if query.Get("error") != "" {
+		http.Error(w, "Login not completed", http.StatusBadRequest)
+		return
+	}
+
+	code := query.Get("code")
+	if code == "" {
+		http.Error(w, "Missing authorization code", http.StatusBadRequest)
 		return
 	}
 	
 	token, err := app.oauth.Exchange(
 		r.Context(),
-		r.URL.Query().Get("code"),
+		code,
 		oauth2.VerifierOption(pending.pkceVerifier),
 	)
 	if err != nil {
@@ -120,4 +138,48 @@ func (app *application) callbackHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Invalid login nonce", http.StatusUnauthorized)
 		return
 	}
+
+	var claims struct {
+		Email string `json:"email"`
+	}
+	if err := idToken.Claims(&claims); err != nil {
+		http.Error(w, "Invalid user claims", http.StatusUnauthorized)
+		return
+	}
+	if idToken.Subject == "" {
+		http.Error(w, "Missing user identity", http.StatusUnauthorized)
+		return
+	}
+
+	b := make([]byte, 32)
+	rand.Read(b)
+
+	sid := base64.RawURLEncoding.EncodeToString(b)
+
+	const sessionTTL = 1 * time.Hour
+	expiresAt := time.Now().Add(sessionTTL)
+
+	// Temp session store
+	app.sessionsMu.Lock()
+	app.sessions[sid] = session{
+		user: user{
+			id: idToken.Subject,
+			email: claims.Email,
+		},
+		expiresAt: expiresAt,
+	}
+	app.sessionsMu.Unlock()
+
+	http.SetCookie(w, &http.Cookie{
+		Name: "session_id",
+		Value: sid,
+		Path: "/",
+		HttpOnly: true,
+		Secure: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge: int(sessionTTL.Seconds()),
+		Expires: expiresAt,
+	})
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
