@@ -42,10 +42,10 @@ func run(logger *slog.Logger) error {
 	}
 
 	app := application{
-		config:  cfg,
-		pending: make(map[string]pendingLogin),
-		sessions: make(map[string]session),
-		oauth:   oauth2Config,
+		config:   cfg,
+		pending:  make(map[string]pendingLogin),
+		sessions: NewSessionStore(),
+		oauth:    oauth2Config,
 	}
 
 	return app.run(app.mount())

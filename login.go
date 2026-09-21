@@ -109,14 +109,15 @@ func (app *application) callbackHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Missing authorization code", http.StatusBadRequest)
 		return
 	}
-	
+
 	token, err := app.oauth.Exchange(
 		r.Context(),
 		code,
 		oauth2.VerifierOption(pending.pkceVerifier),
 	)
 	if err != nil {
-		app.logger.Error("token exchange", "failed token exchange", err)
+		app.logger.Error("token exchange", "failed token exchange", err,
+			"status", http.StatusBadGateway)
 		http.Error(w, "Token exchange failed", http.StatusBadGateway)
 		return
 	}
@@ -151,34 +152,30 @@ func (app *application) callbackHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	b := make([]byte, 32)
-	rand.Read(b)
-
-	sid := base64.RawURLEncoding.EncodeToString(b)
-
-	const sessionTTL = 1 * time.Hour
 	expiresAt := time.Now().Add(sessionTTL)
 
-	// Temp session store
-	app.sessionsMu.Lock()
-	app.sessions[sid] = session{
-		user: user{
-			id: idToken.Subject,
-			email: claims.Email,
-		},
-		expiresAt: expiresAt,
+	u := user{
+		id:    idToken.Subject,
+		email: claims.Email,
 	}
-	app.sessionsMu.Unlock()
+
+	sid, err := app.sessions.Create(r.Context(), u)
+	if err != nil {
+		app.logger.Error("session token", "failed creating session", err,
+			"status", http.StatusInternalServerError)
+		http.Error(w, "failed to create session", http.StatusInternalServerError)
+		return
+	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name: "session_id",
-		Value: sid,
-		Path: "/",
+		Name:     sessionID,
+		Value:    sid,
+		Path:     "/",
 		HttpOnly: true,
-		Secure: true,
+		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge: int(sessionTTL.Seconds()),
-		Expires: expiresAt,
+		MaxAge:   int(sessionTTL.Seconds()),
+		Expires:  expiresAt,
 	})
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)

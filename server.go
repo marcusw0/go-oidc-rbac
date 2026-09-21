@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
-	"time"
 
 	"golang.org/x/oauth2"
 )
@@ -12,15 +11,9 @@ import (
 type application struct {
 	config
 	pendingMu sync.Mutex
-	pending map[string]pendingLogin
-	sessionsMu sync.Mutex
-	sessions map[string]session
-	oauth   oauth2.Config
-}
-
-type session struct {
-	user user
-	expiresAt time.Time
+	pending   map[string]pendingLogin
+	sessions  *sessionStore
+	oauth     oauth2.Config
 }
 
 func (app *application) mount() http.Handler {
