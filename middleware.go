@@ -1,24 +1,45 @@
 package main
 
 import (
+	"context"
 	"net/http"
 )
 
-const (
-	sessionID = "session_id"
-)
+type contextKey string
 
 type user struct {
-	email, id, role string
+	email, id string
+	roles     []string
 }
+
+const (
+	sessionID                 = "session_id"
+	userContextKey contextKey = "authenticated-user"
+)
 
 func (app *application) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if val := r.Context().Value(sessionID); val == nil {
-			http.Redirect(w, r, "/login", http.StatusUnauthorized)
+		sess, err := app.getSession(r)
+		if err != nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(
+			r.Context(),
+			userContextKey,
+			sess.user,
+		)
+
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (app *application) getSession(r *http.Request) (*session, error) {
+	cookie, err := r.Cookie(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return app.sessions.Get(r.Context(), cookie.Value)
 }
